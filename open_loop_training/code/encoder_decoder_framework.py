@@ -153,6 +153,7 @@ class EncoderDecoder(BaseModule):
         steer = batch['steer'].to(dtype=torch.float32).view(-1,1)
         state = [speed, steer, target_point,]
         # extract all modal features
+        print(batch["points"].shape)
         points = batch['points'] if 'points' in batch else None
         cam_feat, lidar_feat, measurement_feat = self.extract_sensor_feat(
             img=batch['img'], 
@@ -450,6 +451,7 @@ class EncoderDecoder(BaseModule):
         Output:
             gt_depths: [B*N*h*w, d]
         """
+        print(gt_depths.shape)
         B, N, H, W = gt_depths.shape
         if min_pooling:
             gt_depths = gt_depths.view(
@@ -486,6 +488,7 @@ class EncoderDecoder(BaseModule):
 
     @force_fp32()
     def get_downsampled_gt_seg(self, gt_seg):
+        print(gt_seg.shape)
         B, N, H, W = gt_seg.shape
         if self.depth_resize is None:
             self.depth_resize = T.Resize((H//self.seg_downsample_factor,W//self.seg_downsample_factor), interpolation=T.InterpolationMode.NEAREST)

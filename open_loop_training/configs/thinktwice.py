@@ -32,7 +32,7 @@ for town in full_towns:
             full_train.append("town"+town + "_" + town_index)
 max_sample_per_town_full = {"town01":1e9, "town02":1e9, "town03":1e9, "town04":1e9, "town05":1e9, "town06":1e9, "town07":1e9, "town10":1e9}
 
-root_dir_all = "/dataset/"
+root_dir_all = "/carla_dataset/dataset/"
 
 train_dir=root_dir_all+"train/"
 val_dir=root_dir_all+"val/"
@@ -41,7 +41,7 @@ plugin = True
 plugin_dir = 'code/'
 
 img_aug = False
-SyncBN=True
+SyncBN=False
 point_cloud_range = [-8.0, -19.2, -4.0, 30.4, 19.2, 10.0] ## The same as Roach
 cfg = dict(
     max_speed=1.3,
@@ -84,7 +84,7 @@ cfg = dict(
 )
 
 ckpt_interval = 1
-batch_size_per_gpu = 2 ## 2 for 3090, 3 for V100, 8 for A100
+batch_size_per_gpu = 6 ## 2 for 3090, 3 for V100, 8 for A100
 if cfg["is_dev"]:
     cfg["train_town"] = local_dev_train
     cfg["val_town"] = local_dev_val
@@ -99,7 +99,7 @@ else:
         cfg["train_town"] = tcp_train
         cfg["val_town"] = tcp_val
         cfg["max_sample_per_town"] = tcp_max_sample_per_town
-    num_worker_per_gpu = 8
+    num_worker_per_gpu = 4
 
 bev_h = 21 ## The number of BEV grid
 bev_w = 21 ## The number of BEV grid
@@ -149,7 +149,7 @@ cfg['seg_converter'] = [
 ##From BEVDepth: https://github.com/Megvii-BaseDetection/BEVDepth, data augmentation
 ida_aug_conf = {
     'resize_lim': (0.56, 0.6255),
-    'final_dim':(2048,128),
+    'final_dim':(128,2048),
     'rot_lim': (0, 0),
     'H': 128,
     'W': 2048,

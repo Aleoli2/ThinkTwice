@@ -259,9 +259,8 @@ class CarlaDataset(BaseDataset):
             index-=len(self.measurements[i])
         while prev_indexs_list[0]+index<0:
             index+=1
-        while True:
-            data = self.prepare_train_data(route_idx, index)
-            return data
+        data = self.prepare_train_data(route_idx, index)
+        return data
 
 
     def prepare_test_data(self, index):
