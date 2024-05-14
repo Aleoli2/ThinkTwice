@@ -40,9 +40,10 @@ class CarlaCollect(object):
                             'pcd_vertical_flip', 'frame_idx', 'img_filename',
                             'img_norm_cfg', 'bda_mat', 'sample_idx',
                             'ida_mats', 'sensor2ego_mats', 'pts_filename',
-                            'scene_token')):
+                            'scene_token', 'cam_intrinsic','lidar2cam', 'img_shape' )):
         self.keys = keys
         self.meta_keys = meta_keys
+        self.format_points=CarlaFormatBundle()
 
     def __call__(self, results):
         """Call function to collect keys in results. The keys in ``meta_keys``
@@ -58,9 +59,12 @@ class CarlaCollect(object):
         """
         data = {}
         img_metas = {}
+        self.format_points(results)
         for key in self.meta_keys:
             if key in results:
                 img_metas[key] = results[key]
+            else:
+                img_metas[key] = np.zeros(1)
         data['img_metas'] = DC(img_metas, cpu_only=True)
         for key in self.keys:
             if key in results:

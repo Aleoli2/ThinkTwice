@@ -163,22 +163,21 @@ def custom_train_detector(model,
         #     # Replace 'ImageToTensor' to 'DefaultFormatBundle'
         #     cfg.data.val.pipeline = replace_ImageToTensor(
         #         cfg.data.val.pipeline)
-        val_dataset = custom_build_dataset(cfg.data.val, dict(test_mode=True))
 
-        val_dataloader = build_dataloader(
-            val_dataset,
-            samples_per_gpu=cfg.data.samples_per_gpu,
-            workers_per_gpu=cfg.data.workers_per_gpu,
-            dist=distributed,
-            shuffle=False,
-            shuffler_sampler=cfg.data.shuffler_sampler,  # dict(type='DistributedGroupSampler'),
-            nonshuffler_sampler=cfg.data.nonshuffler_sampler,  # dict(type='DistributedSampler'),
-        )
+        # val_dataloader = build_dataloader(
+        #     val_dataset,
+        #     samples_per_gpu=cfg.data.samples_per_gpu,
+        #     workers_per_gpu=cfg.data.workers_per_gpu,
+        #     dist=distributed,
+        #     shuffle=False,
+        #     shuffler_sampler=cfg.data.shuffler_sampler,  # dict(type='DistributedGroupSampler'),
+        #     nonshuffler_sampler=cfg.data.nonshuffler_sampler,  # dict(type='DistributedSampler'),
+        # )
         eval_cfg = cfg.get('evaluation', {})
         eval_cfg['by_epoch'] = cfg.runner['type'] != 'IterBasedRunner'
         eval_cfg['jsonfile_prefix'] = osp.join('val', cfg.work_dir, time.ctime().replace(' ','_').replace(':','_'))
         eval_hook = CustomDistEvalHook if distributed else CustomEvalHook
-        runner.register_hook(eval_hook(val_dataloader, **eval_cfg))
+        runner.register_hook(eval_hook(data_loaders[1], **eval_cfg))
 
     # user-defined hooks
     if cfg.get('custom_hooks', None):
@@ -198,5 +197,5 @@ def custom_train_detector(model,
         runner.resume(cfg.resume_from)
     elif cfg.load_from:
         runner.load_checkpoint(cfg.load_from)
-    runner.run(data_loaders, cfg.workflow)
+    runner.run([data_loaders[0]], cfg.workflow)
 

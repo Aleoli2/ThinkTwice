@@ -224,16 +224,16 @@ def main():
         test_cfg=cfg.get('test_cfg'))
     model.init_weights()
     logger.info(f'Model:\n{model}')
-    datasets = [build_dataset(cfg.data.train)]
-    if len(cfg.workflow) == 2:
-        val_dataset = copy.deepcopy(cfg.data.val)
-        # in case we use a dataset wrapper
-        if 'dataset' in cfg.data.train:
-            val_dataset.pipeline = cfg.data.train.dataset.pipeline
-        else:
-            val_dataset.pipeline = cfg.data.train.pipeline
-        val_dataset.test_mode = False
-        datasets.append(build_dataset(val_dataset))
+    datasets = [build_dataset(cfg.data.train),build_dataset(cfg.data.val)]
+    # if len(cfg.workflow) == 2:
+    #     val_dataset = copy.deepcopy(cfg.data.val)
+    #     # in case we use a dataset wrapper
+    #     if 'dataset' in cfg.data.train:
+    #         val_dataset.pipeline = cfg.data.train.dataset.pipeline
+    #     else:
+    #         val_dataset.pipeline = cfg.data.train.pipeline
+    #     val_dataset.test_mode = False
+    #     datasets.append(build_dataset(val_dataset))
     custom_train_model(
         model,
         datasets,

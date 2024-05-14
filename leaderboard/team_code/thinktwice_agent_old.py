@@ -25,7 +25,7 @@ from importlib import import_module
 SAVE_PATH = os.environ.get('SAVE_PATH', None)
 import cv2
 import mmcv
-from mmcv import Config
+from mmengine.config import Config
 from mmdet3d.models import build_model
 from mmcv.runner import (get_dist_info, init_dist, load_checkpoint,
                         wrap_fp16_model)

@@ -27,7 +27,7 @@ class PredictionModule(nn.Module):
     def __init__(self, act):
         super().__init__()
         self.act = act
-        self.spatial_gru = SpatialGRU(input_size=6, hidden_size=32, act=self.act)
+        self.spatial_gru = SpatialGRU(input_size=4, hidden_size=32, act=self.act)
         ## Resiudal Update
         self.ffn = nn.Sequential(
                 nn.Conv2d(32, 64, kernel_size=1),
@@ -54,7 +54,7 @@ class LookModule(nn.Module):
         self.act = act
         self.cam_look_module = SpatialCrossAttention()
         self.lidar_look_module_atten = nn.Sequential(
-                    nn.Linear(6+128, 256),
+                    nn.Linear(4+128, 256),
                     self.act(),
                     nn.Linear(256, 512),
                     nn.Sigmoid(),
@@ -158,7 +158,7 @@ class LookModule(nn.Module):
         look_wp = torch.cat([current_wp, static_point], dim=1)
         ### Add z to 2D BEV coordinate uniformly
         look_wp_3d = torch.cat([look_wp.unsqueeze(2).repeat(1, 1, 15, 1), torch.linspace(-4, 10, 15, dtype=float, device=look_wp.device).unsqueeze(0).unsqueeze(0).unsqueeze(-1).repeat(look_wp.shape[0], look_wp.shape[1], 1, 1)], dim=-1).view(look_wp.shape[0], -1, 3).to(look_wp.device, look_wp.dtype) # B x T x z_level x 3 -> B x T*z_level x 3
-        input_ctrl = torch.cat([current_ctrl_softplus.unsqueeze(2).repeat(1, 1, 15, 1).view(current_ctrl_softplus.shape[0], -1, 4), torch.zeros(current_wp.shape[0], 4*15, 4).to(current_wp.device)], dim=1) ## No control for static points
+        input_ctrl = torch.cat([current_ctrl_softplus.unsqueeze(2).repeat(1, 1, 15, 1).view(current_ctrl_softplus.shape[0], -1, 4), torch.zeros(current_wp.shape[0], 2*15, 4).to(current_wp.device),torch.zeros(current_wp.shape[0], 4*15, 4).to(current_wp.device)], dim=1) ## No control for static points
 
         ## For deformable Attn
         img_query = torch.cat([
@@ -211,11 +211,11 @@ class ThinkTwiceDecoderLayer(nn.Module):
                             nn.Linear(64, 2),
                         )
         self.ctrl_offset_module =  nn.Sequential(
-                            nn.Linear(512+4, 256),
+                            nn.Linear(512+2, 256),
                             self.act(),
                             nn.Linear(256, 64),
                             self.act(),
-                            nn.Linear(64, 4),
+                            nn.Linear(64, 2),
                         )
         
         self.BEV_feat_update_module = nn.Sequential(
@@ -340,7 +340,7 @@ class ThinkTwiceDecoder(BaseModule):
                     nn.Linear(256, 1),
                 )
         # shared branches_neurons
-        self.dim_out = 2
+        self.dim_out = 1
 
         self.policy_head = nn.Sequential(
                 nn.Linear(256, 512),
@@ -436,7 +436,6 @@ class ThinkTwiceDecoder(BaseModule):
         predicted_mu = self.dist_mu(policy).view(-1, self.config.pred_len, self.dim_out)
         predicted_sigma = self.dist_sigma(policy).view(-1, self.config.pred_len, self.dim_out)
         pred_ctrl_lis = [torch.cat([predicted_mu, predicted_sigma], dim=-1)]
-
         ## Look Module
         ### Prepare features for Look Module - Image
         lidar2img = look_feature_metadata[0].to(flattend_BEV_feat.device)
@@ -482,21 +481,22 @@ class ThinkTwiceDecoder(BaseModule):
 
         pred_wp_lis = torch.stack(pred_wp_lis, dim=1) #BxrefinexTx2
         pred_ctrl_lis = torch.clamp(F.softplus(torch.stack(pred_ctrl_lis, dim=1).float()), min=1e-3) #BxrefinexTx4
-        outs['pred_wp'] = pred_wp_lis
-        outs['mu_branches'] = pred_ctrl_lis[:, :, 0, :2]
-        outs['sigma_branches'] = pred_ctrl_lis[:, :, 0, 2:]
-        outs['future_mu'] = pred_ctrl_lis[:, :, 1:, :2]
-        outs['future_sigma'] = pred_ctrl_lis[:, :, 1:, 2:]
+        outs['pred_wp'] = pred_wp_lis[:, -1]
+        outs['action_acker_speed'] = pred_ctrl_lis[:, -1, 0, 0]
+        outs['action_acker_steer'] = pred_ctrl_lis[:, -1, 0, 1]
+        outs['future_action_acker_speed'] = pred_ctrl_lis[:, -1, 1:, 0]
+        outs['future_action_acker_steer'] = pred_ctrl_lis[:, -1, 1:, 1]
+
 
         ## Apply teacher forcing
         if teacher_forcing_data is not None:
             teacher_pred_traj_offset_lis = []
             teacher_pred_ctrl_offset_lis = []
             ##GT input should obtain GT future feature
+            current_ctrl_softplus = torch.cat([torch.cat([teacher_forcing_data["action_acker_speed"], teacher_forcing_data["action_acker_steer"]], dim=-1).unsqueeze(1), 
+                                      torch.cat([teacher_forcing_data["future_action_acker_speed"], teacher_forcing_data["future_action_acker_steer"]],dim=-1)], dim=1).float()
+            
             current_wp = teacher_forcing_data["waypoints"].float()
-
-            current_ctrl_softplus = torch.cat([torch.cat([teacher_forcing_data["action_mu"], teacher_forcing_data["action_sigma"]], dim=-1).unsqueeze(1), torch.cat([torch.stack(teacher_forcing_data["future_action_mu"][:-1], dim=1), torch.stack(teacher_forcing_data["future_action_sigma"][:-1], dim=1)], dim=-1)], dim=1).float()
-
             current_ctrl = inv_softplus(current_ctrl_softplus)
 
             future_bev_feat = None
@@ -541,61 +541,39 @@ class ThinkTwiceDecoder(BaseModule):
         loss_dict = dict()
 
         gt_speed = batch['speed'].to(dtype=torch.float32).view(-1,1) / 12.
-        gt_value = batch['value'].view(-1,1)
-        gt_flattened_BEV_feature = batch['feature']
+        # gt_value = batch['value'].view(-1,1)
+        # gt_flattened_BEV_feature = batch['feature']
         gt_waypoints = batch['waypoints']
 
-        ## Open Loop Statistics
-        with torch.no_grad():
-            pred_action = self._get_action_beta(pred['mu_branches'][:, -1, :], pred['sigma_branches'][:, -1, :])
-            gt_action = self._get_action_beta(batch['action_mu'], batch['action_sigma'])
-            l1_action = F.l1_loss(pred_action, gt_action, reduction="none").detach().mean(dim=0)
-            loss_dict["current_throttle_brake_offset"] = l1_action[0]
-            loss_dict['current_steer_offset'] = l1_action[1]
-            wp_offset = F.l1_loss(pred['pred_wp'][:, -1, :, :], gt_waypoints[:, :, :],reduction="none").detach().mean(dim=0)
-            mean_wp_offset = wp_offset.mean(dim=0) 
-            loss_dict["longitudinal_offset"] = mean_wp_offset[0] 
-            loss_dict["lateral_offset"] = mean_wp_offset[1]
-            loss_dict["longitudinal_offset"] = mean_wp_offset[0] 
-            loss_dict["lateral_offset"] = mean_wp_offset[1]
-
         ## Current Action Loss
-        gt_ctrl_distribution = Beta(batch['action_mu'].unsqueeze(1), batch['action_sigma'].unsqueeze(1))
-        pred_ctrl_disttribution = Beta(pred['mu_branches'], pred['sigma_branches'])
-        kl_div = torch.distributions.kl_divergence(gt_ctrl_distribution, pred_ctrl_disttribution)
-        loss_dict['action_loss'] = kl_div.mean() * self.action_loss_weight
-
-
+        l1_action = (F.l1_loss(pred['action_acker_speed'], batch['action_acker_speed'].reshape(-1), reduction="none")+F.l1_loss(pred['action_acker_steer'], batch['action_acker_steer'].reshape(-1), reduction="none")).detach().mean(dim=0)
+        loss_dict["action_loss"]=l1_action
         loss_dict['speed_loss'] = F.smooth_l1_loss(pred['pred_speed'], gt_speed, reduction="mean")
-        loss_dict['value_loss'] = (F.smooth_l1_loss(pred['pred_value_traj'], gt_value, reduction="mean") + F.smooth_l1_loss(pred['pred_value_ctrl'], gt_value, reduction="none")) * self.config.value_weight
+        #loss_dict['value_loss'] = (F.smooth_l1_loss(pred['pred_value_traj'], gt_value, reduction="mean") + F.smooth_l1_loss(pred['pred_value_ctrl'], gt_value, reduction="none")) * self.config.value_weight
 
-        loss_dict['flattened_feature_loss'] = (F.smooth_l1_loss(pred['pred_features_traj'], gt_flattened_BEV_feature, reduction="mean") + F.smooth_l1_loss(pred['pred_features_ctrl'], gt_flattened_BEV_feature, reduction="mean")) * self.config.features_weight
+        #loss_dict['flattened_feature_loss'] = (F.smooth_l1_loss(pred['pred_features_traj'], gt_flattened_BEV_feature, reduction="mean") + F.smooth_l1_loss(pred['pred_features_ctrl'], gt_flattened_BEV_feature, reduction="mean")) * self.config.features_weight
 
         ## Future Action Loss
-        gt_future_action_mu = torch.stack(batch['future_action_mu'][:-1], axis=1).unsqueeze(1)
-        gt_future_action_sigma = torch.stack(batch['future_action_sigma'][:-1], axis=1).unsqueeze(1)
-        gt_future_ctrl_distribution = Beta(gt_future_action_mu, gt_future_action_sigma)
-        pred_future_ctrl_distribution = Beta(pred['future_mu'], pred['future_sigma'])
-        future_kl_div = torch.distributions.kl_divergence(gt_future_ctrl_distribution, pred_future_ctrl_distribution)
-        loss_dict['future_action_loss'] = future_kl_div.mean() * self.action_loss_weight * 0.25
+        l1_action = (F.l1_loss(pred['future_action_acker_speed'], batch['future_action_acker_speed'].reshape(-1,3), reduction="none")+F.l1_loss(pred['future_action_acker_steer'], batch['future_action_acker_steer'].reshape(-1,3), reduction="none")).detach().mean(dim=0)
+        loss_dict["future_action_loss"]=l1_action
 
         ## Traj Loss
-        wp_loss = F.smooth_l1_loss(pred['pred_wp'], gt_waypoints.unsqueeze(1).repeat(1, pred['pred_wp'].shape[1], 1, 1), reduction="mean")
+        wp_loss = F.smooth_l1_loss(pred['pred_wp'], gt_waypoints, reduction="mean")
         loss_dict['wp_loss'] = wp_loss * self.wp_loss_weight
         
         ## Feature Disillation Loss
         ## BEV Feature Loss of Encoder
-        for feature_map_index in self.distil_index:
-            gt_BEV_feature =  batch["grid_feature"][feature_map_index]
-            pred_BEV_feature = mid_BEV_feature[feature_map_index]
-            loss_dict['BEV_feature_loss'+str(feature_map_index)] = torch.clamp(F.smooth_l1_loss(pred_BEV_feature, gt_BEV_feature, reduction="none"), min=-5.0, max=5.0).mean() * self.distil_kl_loss_weight_dict[feature_map_index]
+        # for feature_map_index in self.distil_index:
+        #     gt_BEV_feature =  batch["grid_feature"][feature_map_index]
+        #     pred_BEV_feature = mid_BEV_feature[feature_map_index]
+        #     loss_dict['BEV_feature_loss'+str(feature_map_index)] = torch.clamp(F.smooth_l1_loss(pred_BEV_feature, gt_BEV_feature, reduction="none"), min=-5.0, max=5.0).mean() * self.distil_kl_loss_weight_dict[feature_map_index]
         
-        ## BEV Feature Loss of Look Module
-        pred_BEV_feature = pred["refine_BEV_feature"]
-        gt_BEV_feature =  batch["grid_feature"][2].unsqueeze(1).repeat(1, pred_BEV_feature.shape[1], 1, 1, 1) ## 21x21 BEV feature map
-        loss_dict['refine_BEV_feature_loss2'] =  torch.clamp(F.smooth_l1_loss(pred_BEV_feature, gt_BEV_feature, reduction="none"), min=-5.0, max=5.0).mean() * self.distil_kl_loss_weight_dict[2]
+        # ## BEV Feature Loss of Look Module
+        # pred_BEV_feature = pred["refine_BEV_feature"]
+        # gt_BEV_feature =  batch["grid_feature"][2].unsqueeze(1).repeat(1, pred_BEV_feature.shape[1], 1, 1, 1) ## 21x21 BEV feature map
+        # loss_dict['refine_BEV_feature_loss2'] =  torch.clamp(F.smooth_l1_loss(pred_BEV_feature, gt_BEV_feature, reduction="none"), min=-5.0, max=5.0).mean() * self.distil_kl_loss_weight_dict[2]
 
-        loss_dict['refine_flattened_feature_loss'] = torch.clamp(F.smooth_l1_loss(pred['refine_flattned_BEV_feature'], gt_flattened_BEV_feature.unsqueeze(1).repeat(1, pred['refine_flattned_BEV_feature'].shape[1], 1), reduction="none"), min=-5.0, max=5.0).mean() * self.config.features_weight * 0.1
+        # loss_dict['refine_flattened_feature_loss'] = torch.clamp(F.smooth_l1_loss(pred['refine_flattned_BEV_feature'], gt_flattened_BEV_feature.unsqueeze(1).repeat(1, pred['refine_flattned_BEV_feature'].shape[1], 1), reduction="none"), min=-5.0, max=5.0).mean() * self.config.features_weight * 0.1
 
         # Teacher Forcing Part
         ## All offset should be zero
@@ -603,20 +581,20 @@ class ThinkTwiceDecoder(BaseModule):
         loss_dict['teacher_action_loss'] = F.smooth_l1_loss(pred['teacher_pred_ctrl_offset_lis'], torch.zeros_like(pred['teacher_pred_ctrl_offset_lis']), reduction='mean')
 
         ## Future Feature Supervision
-        feature_map_index = 2 ## 21x21 feature map
-        gt_future_BEV_feature = torch.stack([_[feature_map_index] for _ in batch["future_grid_feature"]], dim=1)
-        pred_future_BEV_feature = pred["teacher_future_BEV_feature"]
+        # feature_map_index = 2 ## 21x21 feature map
+        # gt_future_BEV_feature = torch.stack([_[feature_map_index] for _ in batch["future_grid_feature"]], dim=1)
+        # pred_future_BEV_feature = pred["teacher_future_BEV_feature"]
         ## NumSamples, RefineNum, TemporalStep, Channel, Width, Height
-        N,R,T,C,W,H = pred_future_BEV_feature.shape
-        gt_future_BEV_feature = gt_future_BEV_feature.unsqueeze(1).repeat(1, R, 1, 1, 1, 1)
-        loss_dict['teacher_future_BEV_feature_loss'+str(feature_map_index)] = torch.clamp(F.smooth_l1_loss(pred_future_BEV_feature, gt_future_BEV_feature, reduction="none"), min=-5.0, max=5.0).mean() * self.distil_kl_loss_weight_dict[2]
+        # N,R,T,C,W,H = pred_future_BEV_feature.shape
+        # gt_future_BEV_feature = gt_future_BEV_feature.unsqueeze(1).repeat(1, R, 1, 1, 1, 1)
+        # loss_dict['teacher_future_BEV_feature_loss'+str(feature_map_index)] = torch.clamp(F.smooth_l1_loss(pred_future_BEV_feature, gt_future_BEV_feature, reduction="none"), min=-5.0, max=5.0).mean() * self.distil_kl_loss_weight_dict[2]
 
         ## BEV Feature Loss of Look Module
-        pred_BEV_feature = pred["teacher_refine_BEV_feature"]
-        gt_BEV_feature =  batch["grid_feature"][2].unsqueeze(1).repeat(1, pred_BEV_feature.shape[1], 1, 1, 1) ## 21x21 BEV feature map
-        loss_dict['teacher_refine_BEV_feature_loss'+str(feature_map_index)] = torch.clamp(F.smooth_l1_loss(pred_BEV_feature, gt_BEV_feature, reduction="none"), min=-5.0, max=5.0).mean() * self.distil_kl_loss_weight_dict[2]
+        # pred_BEV_feature = pred["teacher_refine_BEV_feature"]
+        # gt_BEV_feature =  batch["grid_feature"][2].unsqueeze(1).repeat(1, pred_BEV_feature.shape[1], 1, 1, 1) ## 21x21 BEV feature map
+        # loss_dict['teacher_refine_BEV_feature_loss'+str(feature_map_index)] = torch.clamp(F.smooth_l1_loss(pred_BEV_feature, gt_BEV_feature, reduction="none"), min=-5.0, max=5.0).mean() * self.distil_kl_loss_weight_dict[2]
 
-        loss_dict['teacher_refine_flattened_feature_loss'] = torch.clamp(F.smooth_l1_loss(pred['teacher_refine_flattned_BEV_feature'], gt_flattened_BEV_feature.unsqueeze(1).repeat(1, pred['teacher_refine_flattned_BEV_feature'].shape[1], 1), reduction="none"), min=-5.0, max=5.0).mean() * self.config.features_weight
+        # loss_dict['teacher_refine_flattened_feature_loss'] = torch.clamp(F.smooth_l1_loss(pred['teacher_refine_flattned_BEV_feature'], gt_flattened_BEV_feature.unsqueeze(1).repeat(1, pred['teacher_refine_flattned_BEV_feature'].shape[1], 1), reduction="none"), min=-5.0, max=5.0).mean() * self.config.features_weight
         return loss_dict
     
     @force_fp32()

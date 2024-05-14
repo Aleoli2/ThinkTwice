@@ -20,3 +20,4 @@ dataset/town??_??
 *dataset_metadata.pkl*
 closed_loop_eval_log/eval_log/*
 *old_version*
+open_loop_training/log

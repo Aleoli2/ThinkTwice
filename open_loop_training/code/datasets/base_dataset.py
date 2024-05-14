@@ -34,36 +34,20 @@ class BaseDataset(Dataset):
     """
 
 
-    def __init__(self,
-                 ann_file,
-                 pipeline,
-                 data_prefix='',
-                 test_mode=False):
+    def __init__(self):
         super(BaseDataset, self).__init__()
-        self.data_prefix = expanduser(data_prefix)
-        self.pipeline = Compose(pipeline)
-        self.ann_file = expanduser(ann_file)
-        self.test_mode = test_mode
-        self.data_infos = []
+        self.data_length = 0
 
     @abstractmethod
     def load_annotations(self):
         return mmcv.load(self.ann_file)
 
 
-    def pre_pipeline(self, results):
-        """Prepare results dict for pipeline."""
-        results['img_prefix'] = self.img_prefix
-
-
-
     def __len__(self):
-        return len(self.data_infos)
+        return self.data_length
 
     def __getitem__(self, idx):
-        results = copy.deepcopy(self.data_infos[idx])
-        self.pre_pipeline(results)
-        return self.pipeline(results)
+        pass
 
 
     def evaluate(self,

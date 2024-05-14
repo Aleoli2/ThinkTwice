@@ -20,6 +20,7 @@ from mmcv.runner import force_fp32, auto_fp16
 from .utils import PIDController, FocalLoss, set_dropout_zero, init_weights, SEBasicBlock
 
 
+
 @DETECTORS.register_module()
 class EncoderDecoder(BaseModule):
     def __init__(self,  
@@ -57,7 +58,7 @@ class EncoderDecoder(BaseModule):
         self.act = nn.ReLU
         self.build_fusion_and_flatten_network_for_BEV()
         self.measurements_encoder = nn.Sequential(
-                            nn.Linear(1+2+6, 128),
+                            nn.Linear(2+2, 128),
                             self.act(),
                             nn.Linear(128, 128),
                             self.act(),
@@ -147,9 +148,10 @@ class EncoderDecoder(BaseModule):
     @force_fp32()
     def forward_train(self, batch):
         target_point = batch['target_point'].to(dtype=torch.float32)
-        command = batch['target_command']
-        speed = batch['speed'].to(dtype=torch.float32).view(-1,1) / 12.
-        state = [speed, target_point, command,  batch['target_command_raw']]
+        # command = batch['target_command']
+        speed = batch['speed'].to(dtype=torch.float32).view(-1,1)
+        steer = batch['steer'].to(dtype=torch.float32).view(-1,1)
+        state = [speed, steer, target_point,]
         # extract all modal features
         points = batch['points'] if 'points' in batch else None
         cam_feat, lidar_feat, measurement_feat = self.extract_sensor_feat(
@@ -161,7 +163,7 @@ class EncoderDecoder(BaseModule):
         flattend_BEV_feat, fusion_feats, mid_BEV_feature, mid_lidar_feat = self.get_fusion_feat(cam_feat, lidar_feat)
         
         teacher_forcing_input = {}
-        for teacher_key in ["waypoints", "action_sigma", "action_mu", "future_action_sigma", "future_action_mu"]:
+        for teacher_key in ["waypoints", "action_acker_speed", "action_acker_steer", "future_action_acker_speed", "future_action_acker_steer"]:
             teacher_forcing_input[teacher_key] = batch[teacher_key]
 
         ## Decoder
@@ -194,9 +196,10 @@ class EncoderDecoder(BaseModule):
     def forward_inference(self, batch):
         self.epoch = 10000
         target_point = batch['target_point'].to(dtype=torch.float32)
-        command = batch['target_command']
-        speed = batch['speed'].to(dtype=torch.float32).view(-1,1) / 12.
-        state = [speed, target_point, command,  batch['target_command_raw']]
+        # command = batch['target_command']
+        speed = batch['speed'].to(dtype=torch.float32).view(-1,1)
+        steer = batch['steer'].to(dtype=torch.float32).view(-1,1)
+        state = [speed, steer, target_point,]
         # extract all modal features
         points = batch['points'] if 'points' in batch else None
         cam_feat, lidar_feat, measurement_feat = self.extract_sensor_feat(

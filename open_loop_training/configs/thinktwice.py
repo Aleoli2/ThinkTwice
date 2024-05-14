@@ -32,13 +32,20 @@ for town in full_towns:
             full_train.append("town"+town + "_" + town_index)
 max_sample_per_town_full = {"town01":1e9, "town02":1e9, "town03":1e9, "town04":1e9, "town05":1e9, "town06":1e9, "town07":1e9, "town10":1e9}
 
+root_dir_all = "/dataset/"
+
+train_dir=root_dir_all+"train/"
+val_dir=root_dir_all+"val/"
+
 plugin = True
 plugin_dir = 'code/'
 
-img_aug = True
+img_aug = False
 SyncBN=True
 point_cloud_range = [-8.0, -19.2, -4.0, 30.4, 19.2, 10.0] ## The same as Roach
 cfg = dict(
+    max_speed=1.3,
+    max_steer=24.0,
     ###From TCP
     pred_len = 4, # future waypoints predicted
     turn_KP = 0.75,
@@ -61,8 +68,8 @@ cfg = dict(
     img_aug=img_aug,
 
     ## ThinkTwice configuration
-    undistort = True, ## Use the intrinsics of undistorted images
-    unreal_coord = True, ## Use the coordinate system of Carla - Unreal https://carla.readthedocs.io/en/0.9.10/core_actors/
+    undistort = False, ## Use the intrinsics of undistorted images
+    unreal_coord = False, ## Use the coordinate system of Carla - Unreal https://carla.readthedocs.io/en/0.9.10/core_actors/
     is_dev=False, ## Turn it into True when running on a small dataset for debug
     is_local=True, ## Ignore it since we train our model on a cluster with ceph
     is_full=False, ## Set it as True will use the size of dataset exactly the same as TCP, while set it as False will use all possible data recorded in the ../dataset/dataset_metadata.pkl
@@ -77,7 +84,7 @@ cfg = dict(
 )
 
 ckpt_interval = 1
-batch_size_per_gpu = 8 ## 2 for 3090, 3 for V100, 8 for A100
+batch_size_per_gpu = 2 ## 2 for 3090, 3 for V100, 8 for A100
 if cfg["is_dev"]:
     cfg["train_town"] = local_dev_train
     cfg["val_town"] = local_dev_val
@@ -99,21 +106,53 @@ bev_w = 21 ## The number of BEV grid
 cfg["history_query_index_lis"] = [-1, 0] ## The index of frames used for BEV encoder
 cfg["queue_length"] = len(cfg["history_query_index_lis"]) ## The index of frames used for BEV encoder
 
-camera_list = ['rgb_front', 'rgb_left', 'rgb_right', 'rgb_back']
+camera_list = ['rgb_left', 'rgb_front', 'rgb_right', 'rgb_back']
 num_cams = len(camera_list)
 cfg['camera_names'] = camera_list
 cfg["num_cams"] = num_cams
 cfg['use_depth'] = True ## During Training
 cfg['use_seg'] = True ## During Training
-cfg['seg_label_idxs'] = [1,4,5,6,7,8,10,12,18]
-cfg["num_seg_type"] = len(cfg['seg_label_idxs'])+2
+cfg['seg_label_idxs'] = [0,1,2,3,4]
+cfg["num_seg_type"] = 5
+cfg['seg_converter'] = [
+        0,    # unlabeled     =   0u
+        1,   # road          =   1
+        2,   # sidewalk      =   2
+        0,   # bilding      =   3
+        0,   # wall          =   4
+        0,   # fence         =   5
+        0,   # pole          =   6
+        0,   # traffic light =   7
+        0,   # traffic sign  =   8
+        0,   # vegetation    =   9
+        2,   # terrain       =  10
+        4,   # sky           =  11
+        3,   # pedestrian    =  12
+        3,   # rider         =  13
+        0,   # Car           =  14
+        0,   # trck         =  15
+        0,   # bs           =  16
+        0,   # train         =  17
+        0,   # motorcycle    =  18
+        0,   # bicycle       =  19
+        # custom
+        0,   # static        =  20
+        0,   # dynamic       =  21
+        0,   # other         =  22
+        0,   # water         =  23
+        1,   # road line     =  24
+        2,   # grond        =  25
+        2,   # bridge        =  26
+        1,   # rail track    =  27
+        1    # gard rail    =  28
+    ]
 ##From BEVDepth: https://github.com/Megvii-BaseDetection/BEVDepth, data augmentation
 ida_aug_conf = {
     'resize_lim': (0.56, 0.6255),
-    'final_dim':(448, 896),
+    'final_dim':(2048,128),
     'rot_lim': (0, 0),
-    'H': 900,
-    'W': 1600,
+    'H': 128,
+    'W': 2048,
     'rand_flip': True,
     'bot_pct_lim': (0.0, 0.0),
 }
@@ -236,7 +275,7 @@ test_pipeline = [
 
 
 train_full_queue_pipeline = [
-    dict(type='IDAImageTransform', cfg=cfg, ida_aug_conf=ida_aug_conf, is_train=True),
+    dict(type='IDAImageTransform', cfg=cfg, ida_aug_conf=ida_aug_conf, is_train=True and img_aug),
     dict(type='ImageTransformMulti', aug=True, batch_size=batch_size_per_gpu),
 ]
 val_full_queue_pipeline = [
@@ -250,29 +289,20 @@ data = dict(
     train=dict(
         type=dataset_type,
         cfg=cfg,
-        used_town=cfg["train_town"],
-        pipeline=train_pipeline,
+        root=train_dir,
         full_queue_pipeline=train_full_queue_pipeline,
-        is_local=cfg["is_local"],
-        test_mode=False
         ),
     val=dict(
         type=dataset_type,
         cfg = cfg,
-        used_town=cfg["val_town"],
-        pipeline=test_pipeline,
+        root=val_dir,
         full_queue_pipeline=val_full_queue_pipeline,
-        is_local=cfg["is_local"],
-        test_mode = False
     ),
     test=dict(
         type=dataset_type,
         cfg = cfg,
-        used_town=cfg["val_town"],
-        pipeline=test_pipeline,
+        root=val_dir,
         full_queue_pipeline=val_full_queue_pipeline,
-        is_local=cfg["is_local"],
-        test_mode = False
     ),
     shuffler_sampler=dict(type='DistributedGroupSampler'),
     nonshuffler_sampler=dict(type='DistributedSampler')

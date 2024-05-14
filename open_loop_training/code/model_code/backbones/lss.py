@@ -611,7 +611,6 @@ class LSS(BaseModule):
         )
 
         img_feat_with_depth = img_feat_with_depth.permute(0, 1, 3, 4, 5, 2)
-
         feature_map = self.voxel_pooling_method(geom_xyz, img_feat_with_depth.contiguous(), self.voxel_num.to(img_feat_with_depth.device))
         
         outs["bev"] = feature_map.contiguous()
@@ -658,6 +657,7 @@ class LSS(BaseModule):
         Return:
             Tensor: bev feature map.
         """
+
         if img.dim() == 5:
             img = img.unsqueeze(1)    
 
@@ -679,7 +679,8 @@ class LSS(BaseModule):
             sensor2ego.append(torch.stack(_sensor2ego))
             ida.append(torch.stack(_ida))
         intrins, ida, sensor2ego = torch.stack(intrins), torch.stack(ida), torch.stack(sensor2ego)
-        
+
+
         old_img_metas = img_metas
         img_metas = {}
         img_metas['intrin_mats'] = intrins.to(img.device)
@@ -706,9 +707,11 @@ class LSS(BaseModule):
         outs['lidar2img'] = current_lidar2img
         outs['ida_mat'] = current_ida
 
+
         # multi-frame 
         for sweep_index in range(1, num_sweeps):
             with torch.no_grad():
+
                 sweep_frame_res = self._forward_single_sweep(
                     -sweep_index,
                     img[:, -(sweep_index+1):-sweep_index, ...],
