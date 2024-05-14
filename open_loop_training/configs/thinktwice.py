@@ -32,7 +32,7 @@ for town in full_towns:
             full_train.append("town"+town + "_" + town_index)
 max_sample_per_town_full = {"town01":1e9, "town02":1e9, "town03":1e9, "town04":1e9, "town05":1e9, "town06":1e9, "town07":1e9, "town10":1e9}
 
-root_dir_all = "/carla_dataset/dataset/"
+root_dir_all = "/carla_simulator/dataset/"
 
 train_dir=root_dir_all+"train/"
 val_dir=root_dir_all+"val/"
