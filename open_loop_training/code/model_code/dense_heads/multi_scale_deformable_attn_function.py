@@ -464,7 +464,6 @@ class MSDeformableAttention3D(BaseModule):
         Returns:
              Tensor: forwarded results with shape [num_query, bs, embed_dims].
         """
-
         if value is None:
             value = query
         bs, num_query, _ = query.shape
@@ -514,7 +513,7 @@ class MSDeformableAttention3D(BaseModule):
         #  attention_weights.shape: bs, num_query, num_heads, num_levels, num_all_points
         if torch.cuda.is_available() and value.is_cuda:
             if value.dtype == torch.float16:
-                MultiScaleDeformableAttnFunction = MultiScaleDeformableAttnFunction_fp32
+                MultiScaleDeformableAttnFunction = MultiScaleDeformableAttnFunction_fp16
             else:
                 MultiScaleDeformableAttnFunction = MultiScaleDeformableAttnFunction_fp32
             output = MultiScaleDeformableAttnFunction.apply(

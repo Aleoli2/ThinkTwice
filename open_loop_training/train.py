@@ -234,6 +234,8 @@ def main():
     #         val_dataset.pipeline = cfg.data.train.pipeline
     #     val_dataset.test_mode = False
     #     datasets.append(build_dataset(val_dataset))
+
+    # with torch.no_grad():
     custom_train_model(
         model,
         datasets,

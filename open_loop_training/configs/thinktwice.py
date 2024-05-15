@@ -84,7 +84,7 @@ cfg = dict(
 )
 
 ckpt_interval = 1
-batch_size_per_gpu = 6 ## 2 for 3090, 3 for V100, 8 for A100
+batch_size_per_gpu = 5 ## 2 for 3090, 3 for V100, 8 for A100
 if cfg["is_dev"]:
     cfg["train_town"] = local_dev_train
     cfg["val_town"] = local_dev_val

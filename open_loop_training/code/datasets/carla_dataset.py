@@ -131,6 +131,7 @@ class CarlaDataset(BaseDataset):
             self.commands = [self.commands[0][:2]]
             self.data_length=len(self.measurements[0])
         self.flag = np.ones(len(self), dtype=np.uint8)
+
             
 
     
@@ -166,7 +167,9 @@ class CarlaDataset(BaseDataset):
             waypoint = np.dot(rotMatrix,[wx-robot_x, wy-robot_y])
             waypoints.append(waypoint)
             speed.append(measurements[i]["speed"])
-        while len(waypoints)<pred_length: waypoints.append([0.0,0.0])
+        while len(waypoints)<pred_length: 
+            waypoints.append([0.0,0.0])
+            speed.append(0.0)
         
         return np.array(waypoints), np.array(speed)
 

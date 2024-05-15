@@ -157,10 +157,13 @@ class LookModule(nn.Module):
         static_point = torch.Tensor([[5.0, 0.0], [0.0, -5.0], [0.0, 5.0], [-5.0, 0.0],]).unsqueeze(0).repeat(current_wp.shape[0], 1, 1).to(current_wp.device)
         look_wp = torch.cat([current_wp, static_point], dim=1)
         ### Add z to 2D BEV coordinate uniformly
+
         look_wp_3d = torch.cat([look_wp.unsqueeze(2).repeat(1, 1, 15, 1), torch.linspace(-4, 10, 15, dtype=float, device=look_wp.device).unsqueeze(0).unsqueeze(0).unsqueeze(-1).repeat(look_wp.shape[0], look_wp.shape[1], 1, 1)], dim=-1).view(look_wp.shape[0], -1, 3).to(look_wp.device, look_wp.dtype) # B x T x z_level x 3 -> B x T*z_level x 3
+
         input_ctrl = torch.cat([current_ctrl_softplus.unsqueeze(2).repeat(1, 1, 15, 1).view(current_ctrl_softplus.shape[0], -1, 4), torch.zeros(current_wp.shape[0], 2*15, 4).to(current_wp.device),torch.zeros(current_wp.shape[0], 4*15, 4).to(current_wp.device)], dim=1) ## No control for static points
 
         ## For deformable Attn
+
         img_query = torch.cat([
             input_ctrl, ## predicted control 
             look_wp_3d, ## predict traj
@@ -171,15 +174,19 @@ class LookModule(nn.Module):
             ], dim=-1) #B x T*z_level * 4 + 3 + 128 + 128 + 256
         
         ## Transform into the desired format for the deformable attention
+
         ref_points_cam_rebatch, query_rebatch, indexes_rebatch = self.obtain_cam_ref_points_query(look_wp_3d, coor2img, img_size, img_query, mlvl_feats)
         img_look_features = self.cam_look_module(query=query_rebatch, value=fpn_feat_flatten, reference_points=ref_points_cam_rebatch, spatial_shapes=spatial_shapes, level_start_index=level_start_index, indexes=indexes_rebatch)
+
         img_look_features = img_look_features.unsqueeze(1).repeat(1, temporal_embedding.shape[0], 1)
 
         ## Look Module - Lidar
+
         lidar_attn_weight = self.lidar_look_module_atten(torch.cat([current_wp, current_ctrl_softplus, temporal_embedding.unsqueeze(0).repeat(current_wp.shape[0], 1, 1)], dim=-1)) ## Different feature maps for different control signals and time-steps
 
         temporal_lidar_feat = lidar_attn_weight.unsqueeze(-1).unsqueeze(-1) * lidar_feat_with_high_resolution.unsqueeze(1).float()
         ## Retrieve Lidar features
+
         lidar_look_features = self.obtain_lidar_look_features(current_wp, temporal_lidar_feat)
         lidar_look_features = self.lidar_look_module_MLP(lidar_look_features)
 
@@ -235,7 +242,6 @@ class ThinkTwiceDecoderLayer(nn.Module):
     @force_fp32()
     def forward(self, BEV_feat, current_wp, current_ctrl, future_bev_feat_from_last_layer, parent_module, grid2feat, measurement_feat, flattened_BEV_feat, coor2img, img_size, mlvl_feats, fpn_feat_flatten, spatial_shapes, level_start_index, lidar_feat_with_high_resolution, temporal_embedding, static_embedding):
         current_ctrl_softplus = F.softplus(current_ctrl)
-
         ## Prediction Module
         future_bev_feat = self.prediction_module(current_BEV_feature=BEV_feat, current_wp=current_wp, current_ctrl=current_ctrl_softplus, future_bev_feat_from_last_layer=future_bev_feat_from_last_layer)
 
@@ -247,15 +253,13 @@ class ThinkTwiceDecoderLayer(nn.Module):
         look_features = self.look_module(
             current_wp=current_wp, current_ctrl_softplus=current_ctrl_softplus, measurement_feat=measurement_feat, flattened_feat=flattened_BEV_feat, coor2img=coor2img, img_size=img_size, mlvl_feats=mlvl_feats, fpn_feat_flatten=fpn_feat_flatten, spatial_shapes=spatial_shapes, level_start_index=level_start_index, lidar_feat_with_high_resolution=lidar_feat_with_high_resolution, temporal_embedding=temporal_embedding, static_embedding=static_embedding
         )
-
         all_future_feat = self.mlp(torch.cat([flattened_future_BEV_feat, look_features, temporal_embedding.unsqueeze(0).repeat(flattened_future_BEV_feat.shape[0], 1, 1), measurement_feat.unsqueeze(1).repeat(1, flattened_future_BEV_feat.shape[1], 1)], dim=-1))
-
         traj_offset =self.traj_offset_module(torch.cat([current_wp, all_future_feat], dim=-1))
+
         ctrl_offset = self.ctrl_offset_module(torch.cat([current_ctrl, all_future_feat], dim=-1))
 
         ## Residual update of feature maps similar to DETR
         updated_BEV_feat = self.BEV_feat_update_module(torch.cat([BEV_feat, all_future_feat.view(BEV_feat.shape[0], -1).unsqueeze(-1).unsqueeze(-1).repeat(1, 1, BEV_feat.shape[2], BEV_feat.shape[3])], dim=1)) + BEV_feat
-
         updated_flattend_BEV_feat = self.flattened_BEV_feat_update_module(torch.cat([flattened_BEV_feat, all_future_feat.view(flattened_BEV_feat.shape[0], -1)], dim=-1)) + flattened_BEV_feat
         return traj_offset, ctrl_offset, future_bev_feat, updated_BEV_feat, updated_flattend_BEV_feat
 
@@ -421,23 +425,28 @@ class ThinkTwiceDecoder(BaseModule):
         outs['bev_feature'] = BEV_feat
         ## Coarase prediction similar to TCP
         ### Predict speed by sensor feature to alleviate copy cat problem
+   
         outs['pred_speed'] = self.speed_branch(flattend_BEV_feat)
         ### Coarse Traj Branch
+
         j_traj = self.join_traj(torch.cat([flattend_BEV_feat, measurement_feat], 1))
         outs['pred_value_traj'] = self.value_branch_traj(j_traj)
         outs['pred_features_traj'] = j_traj
         pred_wp  = self.output_traj(j_traj).view(-1, self.config.pred_len, 2)
         pred_wp_lis = [pred_wp]
         ### Coarse Ctrl Branch
+
         j_ctrl = self.join_ctrl(torch.cat([flattend_BEV_feat, measurement_feat], dim=-1))
         outs['pred_value_ctrl'] = self.value_branch_ctrl(j_ctrl)
         outs['pred_features_ctrl'] = j_ctrl
+
         policy = self.policy_head(j_ctrl)
         predicted_mu = self.dist_mu(policy).view(-1, self.config.pred_len, self.dim_out)
         predicted_sigma = self.dist_sigma(policy).view(-1, self.config.pred_len, self.dim_out)
         pred_ctrl_lis = [torch.cat([predicted_mu, predicted_sigma], dim=-1)]
         ## Look Module
         ### Prepare features for Look Module - Image
+   
         lidar2img = look_feature_metadata[0].to(flattend_BEV_feat.device)
         ida_mat = look_feature_metadata[1].to(flattend_BEV_feat.device)
         fpn_feats = look_feature_metadata[2]
@@ -446,6 +455,7 @@ class ThinkTwiceDecoder(BaseModule):
         mlvl_feats.append(self.fpn_linear1(fpn_feats[1]))
         mlvl_feats.append(self.fpn_linear2(fpn_feats[2]))
         mlvl_feats.append(self.fpn_linear3(fpn_feats[3]))
+
         spatial_shapes, level_start_index, fpn_feat_flatten = self.transform_fpn_feats(mlvl_feats)
         ### Prepare features for Look Module - Lidar
         lidar_feat_with_high_resolution = look_feature_metadata[3]
@@ -460,7 +470,6 @@ class ThinkTwiceDecoder(BaseModule):
         for refine_layer_index in range(self.config["refine_num"]):
             current_wp = pred_wp_lis[-1].detach()
             current_ctrl = pred_ctrl_lis[-1].detach()
-
             traj_offset, ctrl_offset, updated_future_bev_feat, updated_BEV_feat, updated_flattend_BEV_feat = self.decoder_layers[refine_layer_index](BEV_feat=current_BEV_feat, current_wp=current_wp, current_ctrl=current_ctrl, future_bev_feat_from_last_layer=future_bev_feat, parent_module=parent_module, grid2feat=self.grid2feat, measurement_feat=measurement_feat, flattened_BEV_feat=current_flattened_BEV_feat, coor2img=[lidar2img, ida_mat], img_size=self.config["img_size"], mlvl_feats=mlvl_feats, fpn_feat_flatten=fpn_feat_flatten, spatial_shapes=spatial_shapes, level_start_index=level_start_index, lidar_feat_with_high_resolution=lidar_feat_with_high_resolution, temporal_embedding=self.temporal_embedding, static_embedding=self.static_embedding)
 
             pred_wp_lis.append(traj_offset.float()+current_wp.float())
@@ -474,7 +483,6 @@ class ThinkTwiceDecoder(BaseModule):
 
             stored_future_BEV_feat.append(updated_future_bev_feat)
             future_bev_feat = updated_future_bev_feat
-        
         outs["refine_flattned_BEV_feature"] = torch.stack(stored_flattened_BEV_feat, dim=1)
         outs["refine_BEV_feature"] = torch.stack(stored_BEV_feat, dim=1)
         outs["refine_future_BEV_feature"] = torch.stack(stored_future_BEV_feat, dim=1).view(current_wp.shape[0], current_wp.shape[1], self.config["refine_num"], 32, 21, 21).transpose(1, 2)
@@ -490,14 +498,15 @@ class ThinkTwiceDecoder(BaseModule):
 
         ## Apply teacher forcing
         if teacher_forcing_data is not None:
+
             teacher_pred_traj_offset_lis = []
             teacher_pred_ctrl_offset_lis = []
             ##GT input should obtain GT future feature
-            current_ctrl_softplus = torch.cat([torch.cat([teacher_forcing_data["action_acker_speed"], teacher_forcing_data["action_acker_steer"]], dim=-1).unsqueeze(1), 
+            # print(teacher_forcing_data["action_acker_speed"],teacher_forcing_data["action_acker_steer"])
+            current_ctrl = torch.cat([torch.cat([teacher_forcing_data["action_acker_speed"], teacher_forcing_data["action_acker_steer"]], dim=-1).unsqueeze(1), 
                                       torch.cat([teacher_forcing_data["future_action_acker_speed"], teacher_forcing_data["future_action_acker_steer"]],dim=-1)], dim=1).float()
-            
             current_wp = teacher_forcing_data["waypoints"].float()
-            current_ctrl = inv_softplus(current_ctrl_softplus)
+            # current_ctrl = inv_softplus(current_ctrl_softplus)
 
             future_bev_feat = None
             current_BEV_feat = BEV_feat.clone()
@@ -505,6 +514,7 @@ class ThinkTwiceDecoder(BaseModule):
             stored_BEV_feat = []
             stored_flattened_BEV_feat = []
             stored_future_BEV_feat = []
+
             for refine_layer_index in range(self.config["refine_num"]):
                 traj_offset, ctrl_offset, updated_future_bev_feat, updated_BEV_feat, updated_flattend_BEV_feat = self.decoder_layers[refine_layer_index](BEV_feat=current_BEV_feat, current_wp=current_wp, current_ctrl=current_ctrl, future_bev_feat_from_last_layer=future_bev_feat, parent_module=parent_module, grid2feat=self.grid2feat, measurement_feat=measurement_feat, flattened_BEV_feat=current_flattened_BEV_feat, coor2img=[lidar2img, ida_mat], img_size=self.config["img_size"], mlvl_feats=mlvl_feats, fpn_feat_flatten=fpn_feat_flatten, spatial_shapes=spatial_shapes, level_start_index=level_start_index, lidar_feat_with_high_resolution=lidar_feat_with_high_resolution, temporal_embedding=self.temporal_embedding, static_embedding=self.static_embedding)
 

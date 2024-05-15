@@ -153,14 +153,12 @@ class EncoderDecoder(BaseModule):
         steer = batch['steer'].to(dtype=torch.float32).view(-1,1)
         state = [speed, steer, target_point,]
         # extract all modal features
-        print(batch["points"].shape)
         points = batch['points'] if 'points' in batch else None
         cam_feat, lidar_feat, measurement_feat = self.extract_sensor_feat(
             img=batch['img'], 
             state=state, 
             img_metas=batch['img_metas'],
             points=points)
-        
         flattend_BEV_feat, fusion_feats, mid_BEV_feature, mid_lidar_feat = self.get_fusion_feat(cam_feat, lidar_feat)
         
         teacher_forcing_input = {}
@@ -170,27 +168,29 @@ class EncoderDecoder(BaseModule):
         ## Decoder
         pred = self.decoder(flattend_BEV_feat, fusion_feats, measurement_feat, target_point, self, teacher_forcing_input, [cam_feat["lidar2img"], cam_feat["ida_mat"], cam_feat["fpn_feats"], mid_lidar_feat])
         loss_dict = self.decoder.loss(batch, pred, mid_BEV_feature)
-
         ## seg supervision
         if self.use_seg:
             seg_gt = self.get_downsampled_gt_seg(batch['seg'])
             seg_pred = cam_feat['seg']
             seg_loss = self.seg_loss_func(seg_pred, seg_gt)
             loss_dict['seg_loss'] = seg_loss * 10
-          
         ## depth supervision
         if self.use_depth:
             depth_gt = batch['depth']
             depth_gt = self.get_downsampled_gt_depth(depth_gt)
             depth_pred = cam_feat['depth'].permute(0, 2, 3, 1).contiguous().view(
                 -1, self.depth_channels)
-            fg_mask = torch.max(depth_gt, dim=1).values > 0.0
-            depth_loss = F.binary_cross_entropy_with_logits(
-                depth_pred[fg_mask],
-                depth_gt[fg_mask],
-                reduction='none',
-            ).sum() / max(1.0, fg_mask.sum())
-            loss_dict['depth_loss'] = depth_loss
+            loss_dict['depth_loss'] =  F.l1_loss(depth_pred, depth_gt).mean()
+            # depth_gt = batch['depth']
+            # depth_gt = self.get_downsampled_gt_depth(depth_gt)
+            
+            # fg_mask = torch.max(depth_gt, dim=1).values > 0.0
+            # depth_loss = F.binary_cross_entropy_with_logits(
+            #     depth_pred[fg_mask],
+            #     depth_gt[fg_mask],
+            #     reduction='none',
+            # ).sum() / max(1.0, fg_mask.sum())
+            # loss_dict['depth_loss'] = depth_loss
         return loss_dict
     
     ## For close-loop evaluation
@@ -451,7 +451,6 @@ class EncoderDecoder(BaseModule):
         Output:
             gt_depths: [B*N*h*w, d]
         """
-        print(gt_depths.shape)
         B, N, H, W = gt_depths.shape
         if min_pooling:
             gt_depths = gt_depths.view(
@@ -488,7 +487,6 @@ class EncoderDecoder(BaseModule):
 
     @force_fp32()
     def get_downsampled_gt_seg(self, gt_seg):
-        print(gt_seg.shape)
         B, N, H, W = gt_seg.shape
         if self.depth_resize is None:
             self.depth_resize = T.Resize((H//self.seg_downsample_factor,W//self.seg_downsample_factor), interpolation=T.InterpolationMode.NEAREST)
